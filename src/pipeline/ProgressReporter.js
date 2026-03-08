@@ -33,11 +33,13 @@ class ProgressReporter {
 
   /**
    * Send progress event to a job
-   * @param {string} jobId
+   * @param {string} jobId - Job ID (can be null for no-op)
    * @param {string} event - Event type: start, progress, complete, error
    * @param {Object} data - Event data
    */
   send(jobId, event, data = {}) {
+    if (!jobId) return; // No-op if no jobId (e.g., base64 response mode)
+    
     const res = this.connections.get(jobId);
     if (!res) return;
 
@@ -48,30 +50,33 @@ class ProgressReporter {
 
   /**
    * Send progress percentage
-   * @param {string} jobId
+   * @param {string} jobId - Job ID (can be null for no-op)
    * @param {number} percent - 0-100
    * @param {string} message
    */
   progress(jobId, percent, message = '') {
+    if (!jobId) return;
     this.send(jobId, 'progress', { percent, message });
   }
 
   /**
    * Mark job as complete
-   * @param {string} jobId
+   * @param {string} jobId - Job ID (can be null for no-op)
    * @param {Object} result
    */
   complete(jobId, result) {
+    if (!jobId) return;
     this.send(jobId, 'complete', { result });
     this.close(jobId);
   }
 
   /**
    * Mark job as errored
-   * @param {string} jobId
+   * @param {string} jobId - Job ID (can be null for no-op)
    * @param {string} error
    */
   error(jobId, error) {
+    if (!jobId) return;
     this.send(jobId, 'error', { error });
     this.close(jobId);
   }

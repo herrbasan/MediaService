@@ -45,8 +45,12 @@ router.post('/image', upload.single('file'), async (req, res) => {
 
     const responseType = req.body.response_type || 'base64';
 
-    // Create SSE connection for progress
-    const jobId = ProgressReporter.createJob(res);
+    // Only use SSE for progress reporting if not requesting base64 response
+    // For base64, we send a simple JSON response at the end
+    let jobId = null;
+    if (responseType !== 'base64') {
+      jobId = ProgressReporter.createJob(res);
+    }
 
     // Execute processing
     const result = await PipelineExecutor.execute('image', inputBuffer, options, ProgressReporter, jobId);
