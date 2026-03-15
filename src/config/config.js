@@ -24,8 +24,8 @@ function getFfmpegPath() {
 
 module.exports = {
   port: parseInt(process.env.PORT || '3500', 10),
-  maxFileSizeMb: parseInt(process.env.MAX_FILE_SIZE_MB || '25', 10),
-  maxFileSizeBytes: (parseInt(process.env.MAX_FILE_SIZE_MB || '25', 10)) * 1024 * 1024,
+  maxFileSizeMb: parseInt(process.env.MAX_FILE_SIZE_MB || '50', 10),
+  maxFileSizeBytes: (parseInt(process.env.MAX_FILE_SIZE_MB || '50', 10)) * 1024 * 1024,
   logLevel: process.env.LOG_LEVEL || 'info',
   ffmpegPath: getFfmpegPath(),
 };
