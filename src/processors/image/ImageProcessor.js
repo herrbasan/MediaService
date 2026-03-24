@@ -11,7 +11,7 @@ class ImageProcessor extends Processor {
   }
 
   validateOptions(options) {
-    const { max_dimension, quality, format } = options;
+    const { max_dimension, quality, format, crop } = options;
 
     if (max_dimension !== undefined && (max_dimension < 1 || max_dimension > 10000)) {
       throw new Error('max_dimension must be between 1 and 10000');
@@ -22,6 +22,128 @@ class ImageProcessor extends Processor {
     if (format !== undefined && !['jpeg', 'png', 'webp', 'avif', 'gif'].includes(format)) {
       throw new Error('format must be jpeg, png, webp, avif, or gif');
     }
+    if (crop !== undefined) {
+      if (typeof crop !== 'object') {
+        throw new Error('crop must be an object');
+      }
+      const { type } = crop;
+      if (!['region', 'center', 'grid'].includes(type)) {
+        throw new Error('crop.type must be "region", "center", or "grid"');
+      }
+    }
+  }
+
+  /**
+   * Process crop operations
+   */
+  async processCrop(input, metadata, cropOptions, format, quality, onProgress) {
+    const { type, left, top, right, bottom, width: widthPercent, height: heightPercent, grid } = cropOptions;
+    const results = [];
+
+    if (type === 'region') {
+      // Normalized region crop
+      const leftPx = Math.round(left * metadata.width);
+      const topPx = Math.round(top * metadata.height);
+      const rightPx = Math.round(right * metadata.width);
+      const bottomPx = Math.round(bottom * metadata.height);
+      const cropWidth = rightPx - leftPx;
+      const cropHeight = bottomPx - topPx;
+
+      onProgress?.(30, `Cropping region ${leftPx}x${topPx} to ${cropWidth}x${cropHeight}`);
+      const cropped = await sharp(input)
+        .extract({ left: leftPx, top: topPx, width: cropWidth, height: cropHeight })
+        .toBuffer();
+
+      results.push({ index: null, buffer: cropped, bounds: { left: leftPx, top: topPx, width: cropWidth, height: cropHeight } });
+    } else if (type === 'center') {
+      // Center crop by percentage
+      const pct = widthPercent || 50;
+      const heightPct = heightPercent || pct;
+      const cropWidth = Math.round(metadata.width * (pct / 100));
+      const cropHeight = Math.round(metadata.height * (heightPct / 100));
+      const leftPx = Math.round((metadata.width - cropWidth) / 2);
+      const topPx = Math.round((metadata.height - cropHeight) / 2);
+
+      onProgress?.(30, `Center cropping to ${cropWidth}x${cropHeight}`);
+      const cropped = await sharp(input)
+        .extract({ left: leftPx, top: topPx, width: cropWidth, height: cropHeight })
+        .toBuffer();
+
+      results.push({ index: null, buffer: cropped, bounds: { left: leftPx, top: topPx, width: cropWidth, height: cropHeight } });
+    } else if (type === 'grid') {
+      // Grid-based crop
+      const { cols, rows, cells = [] } = grid;
+      const cellWidth = Math.floor(metadata.width / cols);
+      const cellHeight = Math.floor(metadata.height / rows);
+
+      onProgress?.(20, `Grid ${cols}x${rows}, extracting ${cells.length} cells`);
+
+      for (let i = 0; i < cells.length; i++) {
+        const cellIndex = cells[i];
+        const col = cellIndex % cols;
+        const row = Math.floor(cellIndex / cols);
+        const leftPx = col * cellWidth;
+        const topPx = row * cellHeight;
+
+        onProgress?.(20 + Math.round((i / cells.length) * 60), `Extracting cell ${cellIndex} at (${leftPx},${topPx})`);
+
+        const cropped = await sharp(input)
+          .extract({ left: leftPx, top: topPx, width: cellWidth, height: cellHeight })
+          .toBuffer();
+
+        results.push({ index: cellIndex, buffer: cropped, bounds: { left: leftPx, top: topPx, width: cellWidth, height: cellHeight } });
+      }
+    }
+
+    // Encode all results
+    onProgress?.(80, 'Encoding output');
+    const encoded = await Promise.all(results.map(async (r) => {
+      const encodedBuffer = await this.encodeBuffer(r.buffer, format, quality);
+      return {
+        cell_index: r.index,
+        base64: `data:image/${format === 'jpeg' ? 'jpeg' : format};base64,${encodedBuffer.toString('base64')}`,
+        width: r.bounds.width,
+        height: r.bounds.height,
+      };
+    }));
+
+    onProgress?.(100, 'Complete');
+
+    return {
+      buffer: encoded[0]?.base64 || null,
+      metadata: {
+        originalSize: input.length,
+        crops: encoded,
+        format,
+        originalWidth: metadata.width,
+        originalHeight: metadata.height,
+      },
+    };
+  }
+
+  /**
+   * Encode buffer to target format
+   */
+  async encodeBuffer(buffer, format, quality) {
+    let pipeline = sharp(buffer);
+    switch (format) {
+      case 'jpeg':
+        pipeline = pipeline.jpeg({ quality });
+        break;
+      case 'png':
+        pipeline = pipeline.png({ quality });
+        break;
+      case 'webp':
+        pipeline = pipeline.webp({ quality });
+        break;
+      case 'avif':
+        pipeline = pipeline.avif({ quality });
+        break;
+      case 'gif':
+        pipeline = pipeline.gif();
+        break;
+    }
+    return pipeline.toBuffer();
   }
 
   async process(input, options = {}, onProgress) {
@@ -30,6 +152,7 @@ class ImageProcessor extends Processor {
       quality = 85,
       format = 'jpeg',
       strip_exif = true,
+      crop = null,
     } = options;
 
     onProgress?.(5, 'Loading image');
@@ -39,6 +162,11 @@ class ImageProcessor extends Processor {
     // Get metadata for aspect ratio calculation
     const metadata = await pipeline.metadata();
     onProgress?.(15, 'Analyzing dimensions');
+
+    // Handle crop operations
+    if (crop) {
+      return this.processCrop(input, metadata, crop, format, quality, onProgress);
+    }
 
     // Calculate resize dimensions
     let width = metadata.width;

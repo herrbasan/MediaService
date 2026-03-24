@@ -14,6 +14,50 @@ const upload = multer({
 });
 
 /**
+ * POST /v1/optimize/image/crop
+ * Crop an image by region, center, or grid
+ */
+router.post('/image/crop', async (req, res) => {
+  try {
+    let inputBuffer;
+    let originalSize;
+
+    // Handle base64 input
+    if (req.body.base64) {
+      const base64Data = req.body.base64.replace(/^data:[^;]+;base64,/, '');
+      inputBuffer = Buffer.from(base64Data, 'base64');
+      originalSize = inputBuffer.length;
+    } else {
+      return res.status(400).json({ error: 'No base64 data provided' });
+    }
+
+    const { crop, quality, format } = req.body;
+
+    if (!crop || !crop.type) {
+      return res.status(400).json({ error: 'crop object with type (region|center|grid) is required' });
+    }
+
+    const options = {
+      quality: parseInt(quality) || 85,
+      format: format || 'jpeg',
+      crop,
+    };
+
+    const result = await PipelineExecutor.execute('image', inputBuffer, options, ProgressReporter);
+
+    res.json({
+      original_size_bytes: originalSize,
+      ...result.metadata,
+    });
+  } catch (error) {
+    logger.error('Image crop failed', { error: error.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
+/**
  * POST /v1/optimize/image
  * Optimize/resize an image
  */
